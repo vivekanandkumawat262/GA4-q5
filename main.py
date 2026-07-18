@@ -28,6 +28,9 @@ def root():
 
 # ---------------- Extract Graph ----------------
 
+from fastapi import APIRouter
+ 
+
 @app.post("/extract-graph")
 def extract_graph(req: ExtractRequest):
 
@@ -37,47 +40,80 @@ def extract_graph(req: ExtractRequest):
     relationships = []
 
     def add_entity(name, typ):
-        if not any(e["name"] == name for e in entities):
+        name = name.strip(" .,")
+        if name and not any(e["name"] == name for e in entities):
             entities.append({"name": name, "type": typ})
 
-    # Frameworks / Products
-    known_frameworks = [
-        "LangChain",
-        "LlamaIndex",
-        "OpenAI",
-        "FAISS",
-        "Qdrant",
-        "ChromaDB",
-        "Pinecone"
-    ]
+    # -------- Entity Extraction --------
 
-    for item in known_frameworks:
-        if item.lower() in text.lower():
-            typ = "Framework"
-            if item == "OpenAI":
-                typ = "Organization"
-            add_entity(item, typ)
-
-    # Persons
-    for m in re.findall(r"([A-Z][a-z]+(?: [A-Z][a-z]+)+)", text):
+    # Person
+    for m in re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b", text):
         add_entity(m, "Person")
 
-    patterns = [
-        (r"(.+?) was created by (.+)", "CREATED"),
-        (r"(.+?) was developed by (.+)", "DEVELOPED"),
-        (r"(.+?) integrates with (.+)", "INTEGRATED_INTO"),
-        (r"(.+?) authored (.+)", "AUTHORED"),
-        (r"(.+?) hired (.+)", "HIRED")
+    # Organizations
+    org_patterns = [
+        r"\b([A-Z][A-Za-z0-9& ]+(?:Inc|Labs|AI|Research|Company|Corporation|Google|Microsoft|Meta|OpenAI))\b"
     ]
 
-    for pat, rel in patterns:
+    for p in org_patterns:
+        for m in re.findall(p, text):
+            add_entity(m, "Organization")
+
+    # Framework / Product
+    for m in re.findall(r"\b([A-Z][A-Za-z0-9_-]+)\b", text):
+        if any(e["name"] == m for e in entities):
+            continue
+
+        if m in [
+            "LangChain",
+            "LlamaIndex",
+            "FAISS",
+            "Qdrant",
+            "ChromaDB",
+            "Milvus",
+            "Pinecone",
+            "Weaviate",
+            "OpenAI",
+            "Anthropic",
+            "Gemini",
+            "Claude"
+        ]:
+            typ = "Framework"
+            if m in ["OpenAI", "Anthropic"]:
+                typ = "Organization"
+            add_entity(m, typ)
+
+    # -------- Relationship Extraction --------
+
+    rules = [
+
+        (r"(.+?) was created by (.+)", "CREATED"),
+        (r"(.+?) was developed by (.+)", "DEVELOPED"),
+        (r"(.+?) was founded by (.+)", "FOUNDED"),
+        (r"(.+?) founded (.+)", "FOUNDED"),
+        (r"(.+?) created (.+)", "CREATED"),
+        (r"(.+?) developed (.+)", "DEVELOPED"),
+        (r"(.+?) integrates with (.+)", "INTEGRATED_INTO"),
+        (r"(.+?) integrated into (.+)", "INTEGRATED_INTO"),
+        (r"(.+?) uses (.+)", "INTEGRATED_INTO"),
+        (r"(.+?) built on (.+)", "INTEGRATED_INTO"),
+        (r"(.+?) hired (.+)", "HIRED"),
+        (r"(.+?) authored (.+)", "AUTHORED"),
+        (r"(.+?) wrote (.+)", "AUTHORED"),
+    ]
+
+    for pat, rel in rules:
+
         m = re.search(pat, text, re.I)
+
         if m:
-            left = m.group(1).strip().split()[-2:]
-            right = m.group(2).strip().split(".")[0]
+
+            a = m.group(1).strip(" .")
+            b = m.group(2).strip(" .")
+
             relationships.append({
-                "source": right,
-                "target": " ".join(left),
+                "source": b,
+                "target": a,
                 "relation": rel
             })
 
@@ -85,6 +121,7 @@ def extract_graph(req: ExtractRequest):
         "entities": entities,
         "relationships": relationships
     }
+
 
 # ---------------- Graph Query ----------------
 
